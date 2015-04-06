@@ -13,6 +13,8 @@
 
 volatile xTimerHandle xTimers;
 volatile xQueueHandle xQueue = NULL;
+volatile xQueueHandle xQueueFib = NULL;
+extern xQueueHandle serial_printf_queue;
 
  struct FibMessage
  {
@@ -37,6 +39,7 @@ void mmtest_command(int, char **);
 void test_command(int, char **);
 void tic_command(int, char **);
 void toc_command(int, char **);
+void fib_command(int, char **);
 void _command(int, char **);
 
 #define MKCL(n, d) {.name=#n, .fptr=n ## _command, .desc=d}
@@ -52,6 +55,7 @@ cmdlist cl[]={
 	MKCL(test, "test new function"),
 	MKCL(tic, "start counter"),
 	MKCL(toc, "return counter value"),
+	MKCL(fib, "return fibonacci value"),
 	MKCL(, ""),
 };
 
@@ -228,6 +232,64 @@ void toc_command(int n, char*argv[])
 	{
 		fio_printf(1, "\r\nTimer not start\r\n");
 	}
+}
+
+long fibN(int pos)
+{
+	if (pos > 1)
+		return fibN(pos - 2) + fibN(pos - 1);
+	else if (pos == 1)
+		return 1;
+	else
+		return 0;
+}
+
+void fib_task(void *pvParameters)
+{
+	struct SCIMessage buf;
+	struct FibMessage fib;
+	xQueueReceive( xQueueFib, &( fib ), ( portTickType ) 10 );
+	int i = fibN(fib.pos);
+
+	sprintf(buf.cData, "pos:%d reslut:%d\r\n", fib.pos, i);
+	xQueueSend( serial_printf_queue, ( void * ) &buf, ( portTickType ) 0 );
+	//fio_printf(2, "pos:%d reslut:%d\r\n",fib.pos, i);
+	vTaskDelete(fib.xHandle);
+}
+
+void fib_command(int n, char*argv[])
+{
+	struct FibMessage fib;
+	fib.pos = 0;
+	if (n > 0)
+	{
+		char cPos[4] = {0};
+		unsigned char i, len = strlen(argv[1]);
+		if (len > 4)
+			len = 4;
+		memcpy(&cPos[0], argv[1], len);
+		cPos[len] = 0;
+		for (i = 0; i < len; i++)
+		{
+			if (cPos[i] >= '0' && cPos[i] <= '9')
+			{
+				fib.pos = fib.pos * 10 + (cPos[i] - '0');
+			}
+			else
+			{
+				break;
+			}
+		}
+	}
+	if (xQueueFib == NULL)
+	{
+		xQueueFib = xQueueCreate(1, sizeof(struct FibMessage));
+	}
+	xTaskCreate(fib_task,
+	            (signed portCHAR *) "FIB",
+	            512 /* stack size */, NULL, tskIDLE_PRIORITY + 1, &fib.xHandle);
+	xQueueSend( xQueueFib, ( void * ) &fib, ( portTickType ) 0 );
+	fio_printf(1, "\r\nstart cal\r\n");
 }
 
 void help_command(int n,char *argv[]){
