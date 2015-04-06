@@ -28,6 +28,10 @@ volatile xSemaphoreHandle serial_tx_wait_sem = NULL;
 /* Add for serial input */
 volatile xQueueHandle serial_rx_queue = NULL;
 
+volatile xQueueHandle serial_printf_queue = NULL;
+
+xTaskHandle xHandle_printfSerial = NULL;
+
 /* IRQ handler to handle USART2 interruptss (both transmit and receive
  * interrupts). */
 void USART2_IRQHandler()
@@ -85,6 +89,20 @@ char recv_byte()
 	while(!xQueueReceive(serial_rx_queue, &msg, portMAX_DELAY));
 	return msg;
 }
+
+void serial_printf(void *pvParameters)
+{
+	struct SCIMessage buf;
+	while (1)
+	{
+		if (xQueueReceive( serial_printf_queue, &buf, ( portTickType ) 10 )) {
+			vTaskPrioritySet(xHandle_printfSerial, tskIDLE_PRIORITY + 3);
+			fio_printf(2, "%s", buf.cData);
+			vTaskPrioritySet(xHandle_printfSerial, tskIDLE_PRIORITY + 1);
+		}
+	}
+}
+
 void command_prompt(void *pvParameters)
 {
 	char buf[128];
@@ -97,13 +115,14 @@ void command_prompt(void *pvParameters)
 		fio_read(0, buf, 127);
 	
 		int n=parse_command(buf, argv);
-
+		vTaskSuspend(xHandle_printfSerial);
 		/* will return pointer to the command function */
 		cmdfunc *fptr=do_command(argv[0]);
 		if(fptr!=NULL)
 			fptr(n, argv);
 		else
 			fio_printf(2, "\r\n\"%s\" command not found.\r\n", argv[0]);
+		vTaskResume(xHandle_printfSerial);
 	}
 
 }
@@ -164,12 +183,17 @@ int main()
 	/* Add for serial input 
 	 * Reference: www.freertos.org/a00116.html */
 	serial_rx_queue = xQueueCreate(1, sizeof(char));
+	serial_printf_queue = xQueueCreate(10, sizeof(struct SCIMessage));
 
     register_devfs();
 	/* Create a task to output text read from romfs. */
 	xTaskCreate(command_prompt,
 	            (signed portCHAR *) "CLI",
 	            512 /* stack size */, NULL, tskIDLE_PRIORITY + 2, NULL);
+	            
+	xTaskCreate(serial_printf,
+				(signed portCHAR *) "SCI",
+				512 /* stack size */, NULL, tskIDLE_PRIORITY + 1, &xHandle_printfSerial);
 
 #if 0
 	/* Create a task to record system log. */
