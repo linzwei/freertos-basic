@@ -24,6 +24,10 @@ static ssize_t stdin_read(void * opaque, void * buf, size_t count) {
     while(i < count&&endofline!=1){
 	ptrbuf[i]=recv_byte();
 	switch(ptrbuf[i]){
+        case 0x03:
+            send_byte('^');
+            send_byte('c');
+            i = 0;
 		case '\r':
 		case '\n':
 			ptrbuf[i]='\0';
