@@ -8,7 +8,18 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "host.h"
+#include "queue.h"
+#include "timers.h"
 
+volatile xTimerHandle xTimers;
+volatile xQueueHandle xQueue = NULL;
+
+ struct FibMessage
+ {
+	xTaskHandle xHandle;
+	int pos;
+ };
+ 
 typedef struct {
 	const char *name;
 	cmdfunc *fptr;
@@ -24,6 +35,8 @@ void help_command(int, char **);
 void host_command(int, char **);
 void mmtest_command(int, char **);
 void test_command(int, char **);
+void tic_command(int, char **);
+void toc_command(int, char **);
 void _command(int, char **);
 
 #define MKCL(n, d) {.name=#n, .fptr=n ## _command, .desc=d}
@@ -37,6 +50,8 @@ cmdlist cl[]={
 	MKCL(mmtest, "heap memory allocation test"),
 	MKCL(help, "help"),
 	MKCL(test, "test new function"),
+	MKCL(tic, "start counter"),
+	MKCL(toc, "return counter value"),
 	MKCL(, ""),
 };
 
@@ -150,6 +165,69 @@ void host_command(int n, char *argv[]){
     else {
         fio_printf(2, "\r\nUsage: host 'command'\r\n");
     }
+}
+
+void vTimerCallback( xTimerHandle pxTimer ){
+	int i;
+	// Optionally do something if the pxTimer parameter is NULL.
+	configASSERT( pxTimer );
+	if( xQueueReceive( xQueue, &( i ), ( portTickType ) 10 ) )
+	{
+		i++;
+		xQueueSend( xQueue, ( void * ) &i, ( portTickType ) 0 );
+	}
+}
+
+void tic_command(int n, char*argv[])
+{
+	if (xQueue == NULL)
+	{
+		xQueue = xQueueCreate(1, sizeof(int));
+	}
+	if ( xTimers == NULL )
+	{
+		xTimers = xTimerCreate((const signed char *)"Timer",				// Just a text name, not used by the kernel.
+								( 10 ),				// The timer period in ticks.
+								pdTRUE,				// The timers will auto-reload themselves when they expire.
+								( void * ) 0, 		// Assign each timer a unique id equal to its array index.
+								vTimerCallback 		// Each timer calls the same callback when it expires.
+								               );
+	}
+	if ( xTimerIsTimerActive( xTimers ) == pdFALSE )
+	{
+		if ( xTimerStart( xTimers, 0 ) != pdPASS )
+		{
+			// The timer could not be set into the Active state.
+		}
+		else
+		{
+			fio_printf(1, "\r\nTimer start\r\n");
+		}
+	}
+	else
+	{
+		fio_printf(1, "\r\ntimer restart\r\n");
+	}
+	int i;
+	xQueueReceive( xQueue, &( i ), ( portTickType ) 10 );
+	i = 0;
+	xQueueSend( xQueue, ( void * ) &i, ( portTickType ) 0 );
+}
+
+void toc_command(int n, char*argv[])
+{
+	if ( xTimerIsTimerActive( xTimers ) != pdFALSE ) // or more simply and equivalently "if( xTimerIsTimerActive( xTimer ) )"
+	{
+		int i;
+		xQueueReceive( xQueue, &( i ), ( portTickType ) 10 );
+		xQueueSend( xQueue, ( void * ) &i, ( portTickType ) 0 );
+		fio_printf(1, "\r\nElapsed count:%d\r\n", i);
+		xTimerStop( xTimers, 0 );
+	}
+	else
+	{
+		fio_printf(1, "\r\nTimer not start\r\n");
+	}
 }
 
 void help_command(int n,char *argv[]){
